@@ -81,6 +81,15 @@ struct BackupSettingsView: View {
     @State private var localCopyRemoved = false
     @State private var showShare = false
     @State private var showSaveToFiles = false
+    /// A destination that needs no App Group, File Provider, or writable folder:
+    /// keep the finished `.minisbak` in app-owned storage and hand its URL to
+    /// iOS's system share sheet. Persisted because destinations are preferences,
+    /// not one-run actions.
+    @AppStorage("backup.destination.systemShare") private var systemShareEnabled = false
+    /// Snapshot of the share choice for the completed run. Keeping this
+    /// separate from the live toggle means changing the next run's destination
+    /// cannot rewrite the result card for the backup that just finished.
+    @State private var resultUsesSystemShare = false
 
     /// §6.2 path 2 — mounted folders this backup is also delivered into.
     /// Mirrored into @State so toggling redraws; the source of truth stays in
@@ -423,7 +432,8 @@ struct BackupSettingsView: View {
                     // per-destination rows below name what went wrong, and the
                     // footer states the local copy was kept, so the package is
                     // still reachable from Files (Minis ▸ Backups).
-                    if shareURL != nil, deliveryResults.isEmpty {
+                    if shareURL != nil,
+                       deliveryResults.isEmpty || resultUsesSystemShare {
                         Button {
                             showShare = true
                         } label: {
@@ -460,13 +470,19 @@ struct BackupSettingsView: View {
                 } footer: {
                     if localCopyRemoved {
                         Text("Delivered to all \(deliveryResults.count) destination(s) and verified. The copy on this iPhone was removed to save space.")
+                    } else if resultUsesSystemShare && deliveryResults.isEmpty {
+                        Text("The backup is ready in app-owned storage. Use Share to send the original .minisbak file to Files, AirDrop, or another app.")
                     } else if deliveryResults.isEmpty {
                         Text("Saved in Minis ▸ Backups. Use Save to Files to copy it to iCloud Drive, a connected server, or another cloud provider.")
                     } else {
                         let ok = deliveryResults.filter(\.succeeded).count
                         // The local copy is stated explicitly so a user whose
                         // NAS was offline can see the backup still exists.
-                        Text("Saved in Minis ▸ Backups, and copied to \(ok) of \(deliveryResults.count) selected folder(s).")
+                        if resultUsesSystemShare {
+                            Text("Saved in Minis ▸ Backups and copied to \(ok) of \(deliveryResults.count) selected folder(s). Use Share to send another copy.")
+                        } else {
+                            Text("Saved in Minis ▸ Backups, and copied to \(ok) of \(deliveryResults.count) selected folder(s).")
+                        }
                     }
                 }
             }
@@ -592,7 +608,7 @@ struct BackupSettingsView: View {
     /// surprise. Having none at all is the state that makes a backup
     /// pointless, and that is what this gates.
     private var hasDestination: Bool {
-        !remotes.isEmpty || !BackupDestinations.eligibleFolders.isEmpty
+        systemShareEnabled || !remotes.isEmpty || !BackupDestinations.eligibleFolders.isEmpty
     }
 
     private var passphraseValid: Bool {
@@ -827,6 +843,27 @@ struct BackupSettingsView: View {
     private var destinationSection: some View {
         let eligible = BackupDestinations.eligibleFolders
         Section {
+            // This is a real destination even though it has no persistent
+            // endpoint of its own: the completed package is kept in app-owned
+            // storage and its URL is passed directly to iOS. It therefore works
+            // when App Groups/File Provider access was stripped by sideloading
+            // and when the document picker cannot grant a writable folder.
+            Toggle(isOn: $systemShareEnabled) {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Color.green, in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("System Share")
+                        Text("Open the iOS share sheet when the backup is ready")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             // Network drives added in-app (SMB / WebDAV / SFTP / S3 / FTP).
             // Listed first: a user who went to the trouble of typing in a
             // server address is more invested in it than in a folder they
@@ -884,7 +921,7 @@ struct BackupSettingsView: View {
                 }
             }
 
-            if eligible.isEmpty && remotes.isEmpty {
+            if eligible.isEmpty && remotes.isEmpty && !systemShareEnabled {
                 // Empty is the NORMAL starting state, so this reads as the
                 // next step rather than a problem to fix.
                 //
@@ -964,7 +1001,11 @@ struct BackupSettingsView: View {
         } header: {
             Text("Backup Destinations")
         } footer: {
-            if eligible.isEmpty {
+            if systemShareEnabled && eligible.isEmpty && remotes.isEmpty {
+                Text("When the backup is ready, Minis opens the iOS share sheet with the original .minisbak file. No writable folder or File Provider access is required.")
+            } else if systemShareEnabled {
+                Text("The system share sheet opens after the backup is ready. Enabled folders and servers also receive their own verified copies.")
+            } else if eligible.isEmpty && remotes.isEmpty {
                 Text("Add a folder to also copy each backup there — including a server connected in the Files app (SMB, WebDAV) or a cloud provider.")
             } else {
                 Text("Each new backup is also copied to the selected folders — including servers connected in the Files app (SMB, WebDAV) and cloud providers. A folder that is offline is reported and skipped; the local copy is always kept.")
@@ -1008,12 +1049,17 @@ struct BackupSettingsView: View {
     ///   new one. Only ever true from the Resume action on that run's history
     ///   row — Start Backup always means "back up the data as it is now".
     private func runExport(resuming: Bool = false) async {
+        // Snapshot the destination at start. The toggle remains a preference
+        // for the next run; changing it while a long export is underway must
+        // not alter whether this run keeps and presents its package.
+        let shouldShareAfterExport = systemShareEnabled
         isExporting = true
         errorText = nil
         result = nil
         shareURL = nil
         deliveryResults = []
         localCopyRemoved = false
+        resultUsesSystemShare = false
         defer { isExporting = false }
 
         let options = BackupExporter.Options(
@@ -1077,6 +1123,7 @@ struct BackupSettingsView: View {
             let stable = try BackupDelivery.moveToVisibleStorage(summary.packageURL)
             result = summary
             shareURL = stable
+            resultUsesSystemShare = shouldShareAfterExport
 
             // §6.2 path 2. Runs AFTER the local copy is safely in place, so a
             // dead network share can never cost the user the backup itself.
@@ -1121,7 +1168,9 @@ struct BackupSettingsView: View {
             // the phone just spends the user's storage — 236 MB per run adds
             // up fast. Any failure (or having no destinations at all) keeps
             // it, so the backup always exists somewhere.
-            if !deliveryResults.isEmpty, deliveryResults.allSatisfy(\.succeeded) {
+            if !shouldShareAfterExport,
+               !deliveryResults.isEmpty,
+               deliveryResults.allSatisfy(\.succeeded) {
                 let freed = (try? FileManager.default.attributesOfItem(
                     atPath: stable.path)[.size] as? Int64) ?? 0
                 try? FileManager.default.removeItem(at: stable)
@@ -1134,6 +1183,9 @@ struct BackupSettingsView: View {
                 // tell "cleaned up" from "the backup is gone".
                 BackupTransferStatus.shared.noteCleanup(String(
                     localized: "Local copy removed — \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)) freed on this iPhone"))
+            } else if shouldShareAfterExport, !deliveryResults.isEmpty {
+                BackupTransferStatus.shared.noteCleanup(String(
+                    localized: "Local copy kept for System Share"))
             } else if !deliveryResults.isEmpty {
                 BackupTransferStatus.shared.noteCleanup(String(
                     localized: "Local copy kept — not every destination was verified"))
@@ -1163,6 +1215,12 @@ struct BackupSettingsView: View {
 
             statusText = ""
             logger.info("[Backup] user export complete bytes=\(summary.totalBytes) delivered=\(deliveryResults.filter(\.succeeded).count)/\(deliveryResults.count)")
+            if shouldShareAfterExport {
+                // Present only after the package is closed, moved to stable
+                // app-owned storage, and recorded in history. Cancelling the
+                // sheet does not delete it; the result card can reopen Share.
+                showShare = true
+            }
         } catch is CancellationError {
             // The user pressed Stop. That is an ACTION they took, not a failure
             // that happened to them — reporting it in red as an error (with
