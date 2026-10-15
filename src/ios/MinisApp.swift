@@ -128,6 +128,18 @@ struct MinisApp: App {
         //
         // `install` is idempotent, so the later onAppLaunch() call is a no-op.
         CrashSignalHandler.install()
+        // Sideloading profiles commonly strip App Groups and iCloud even when
+        // the IPA declares them. CloudKit can then terminate the process before
+        // the user can reach Settings to turn sync back off. Treat a missing
+        // App Group container as proof that this installation lacks the shared
+        // capabilities and disable both sync generations before either engine
+        // is initialized. Local chats, files, skills, and settings are untouched.
+        if FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: SharedContainerStore.appGroupID
+        ) == nil {
+            UserDefaults.standard.set(false, forKey: "cloudSync.enabled")
+            UserDefaults.standard.set(false, forKey: "cloudSync.v2.enabled")
+        }
         // [T-auto-grouping-default-on] Auto-grouping ships ON. `bool(forKey:)`
         // returns false for an unregistered key, so the default has to be
         // registered here rather than expressed at the (multiple) read sites —
