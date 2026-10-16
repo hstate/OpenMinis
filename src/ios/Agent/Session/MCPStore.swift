@@ -123,8 +123,8 @@ final class MCPStore: ObservableObject {
     /// (invisible to the guest unless registered in fakefs meta.db — the bug
     /// that motivated the move). Kept only for one-time migration.
     nonisolated private static var legacyServersFileURL: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("alpine-rootfs/data/var/minis/mcp-servers", isDirectory: true)
+        RootfsManager.shared.dataPath
+            .appendingPathComponent("var/minis/mcp-servers", isDirectory: true)
             .appendingPathComponent("servers.json")
     }
 

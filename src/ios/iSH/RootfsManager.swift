@@ -12,6 +12,7 @@ import SQLite3
 class RootfsManager {
     static let shared = RootfsManager()
     private let logger = AppLogger(category: "RootfsManager")
+    private let resolvedRootfsPath: URL
 
     /// [T-mcp-cli-help-and-readonly-ios] Guest path of the bundled minis-mcp-cli
     /// Python lib. Its files are mounted read-only (see applyDefaultMountOverlay).
@@ -30,11 +31,56 @@ class RootfsManager {
     /// process lifetime; it is reset naturally on the next cold launch.
     private(set) var didResetWhileBooted = false
 
-    private init() {}
+    private init() {
+        resolvedRootfsPath = Self.prepareStorageLayout()
+    }
 
-    var rootfsPath: URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documents.appendingPathComponent("alpine-rootfs")
+    var rootfsPath: URL { resolvedRootfsPath }
+
+    /// Moves fakefs internals out of Documents before iOS exposes that directory
+    /// through File Sharing. If migration fails, the legacy location remains the
+    /// active root so an upgrade can never strand or replace existing data.
+    private static func prepareStorageLayout() -> URL {
+        let fm = FileManager.default
+        let logger = AppLogger(category: "RootfsManager")
+        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? documents
+        let legacy = documents.appendingPathComponent("alpine-rootfs", isDirectory: true)
+        let preferred = support
+            .appendingPathComponent("environment", isDirectory: true)
+            .appendingPathComponent("alpine-rootfs", isDirectory: true)
+
+        let exchange = documents.appendingPathComponent("Minis Files", isDirectory: true)
+        do {
+            try fm.createDirectory(at: exchange, withIntermediateDirectories: true)
+        } catch {
+            logger.warning("[Rootfs] could not create Files exchange directory: \(error.localizedDescription)")
+        }
+
+        if fm.fileExists(atPath: preferred.path) {
+            return preferred
+        }
+        guard fm.fileExists(atPath: legacy.path) else {
+            try? fm.createDirectory(
+                at: preferred.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            return preferred
+        }
+
+        do {
+            try fm.createDirectory(
+                at: preferred.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fm.moveItem(at: legacy, to: preferred)
+            logger.info("[Rootfs] migrated fakefs out of Documents to \(preferred.path)")
+            return preferred
+        } catch {
+            logger.error("[Rootfs] migration failed; continuing at legacy path: \(error.localizedDescription)")
+            return legacy
+        }
     }
 
     var dataPath: URL {

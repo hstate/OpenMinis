@@ -615,6 +615,7 @@ actor ISHExecutionCoordinator {
             (AIChatViewModel.minisMemoryPersistentDir, AIChatViewModel.minisMemoryLinuxDir),
             (AIChatViewModel.minisSkillsPersistentDir, AIChatViewModel.minisSkillsLinuxDir),
             (AIChatViewModel.minisSharedPersistentDir, AIChatViewModel.minisSharedLinuxDir),
+            (AIChatViewModel.minisFilesPersistentDir, AIChatViewModel.minisFilesLinuxDir),
             (AIChatViewModel.minisMcpServersPersistentDir, AIChatViewModel.minisMcpServersLinuxDir),
         ]
 

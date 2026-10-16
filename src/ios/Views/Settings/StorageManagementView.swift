@@ -199,7 +199,12 @@ class StorageManagementViewModel: ObservableObject {
             // ---- Library ------------------------------------------------------
             for (rel, size) in self.entries(under: libraryURL) {
                 total += size
-                if rel.hasPrefix("MinisChat/minis/") {
+                if rel.hasPrefix("Application Support/environment/alpine-rootfs/")
+                    || rel == "Application Support/environment/alpine-rootfs" {
+                    shell += size
+                } else if rel.hasPrefix("Application Support/environment/.alpine-rootfs-broken-") {
+                    staleRootfs += size
+                } else if rel.hasPrefix("MinisChat/minis/") {
                     // Library/MinisChat/minis/<sessionId>/…
                     let parts = rel.split(separator: "/", maxSplits: 3, omittingEmptySubsequences: false)
                     guard parts.count >= 3 else { continue }

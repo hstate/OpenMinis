@@ -89,8 +89,8 @@ final class SkillStore: ObservableObject {
     }
 
     private var rootfsSkillsDir: URL {
-        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documents.appendingPathComponent("alpine-rootfs/data/var/minis/skills")
+        RootfsManager.shared.dataPath
+            .appendingPathComponent("var/minis/skills", isDirectory: true)
     }
 
     private init() {
@@ -1664,8 +1664,7 @@ Do not create extraneous files: README.md, INSTALLATION_GUIDE.md, CHANGELOG.md, 
     private static let SQLITE_TRANSIENT_PTR = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     private var fakefsMetaDBPath: String {
-        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documents.appendingPathComponent("alpine-rootfs/meta.db").path
+        RootfsManager.shared.rootfsPath.appendingPathComponent("meta.db").path
     }
 
     private func bindPathBlob(_ stmt: OpaquePointer, index: Int32, path: String) {

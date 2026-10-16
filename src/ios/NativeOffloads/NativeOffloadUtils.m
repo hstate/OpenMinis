@@ -326,10 +326,17 @@ NSString *_Nullable noff_resolve_host_path(NSString *guestPath) {
         return guestPath;
     }
 
-    // Documents/alpine-rootfs/data/ is the fakefs data root
+    // Resolve the active fakefs data root. New builds keep it in Application
+    // Support so iOS File Sharing can expose Documents safely; fall back to the
+    // legacy Documents location if an on-device migration could not complete.
+    NSString *support = NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *preferred = [support stringByAppendingPathComponent:@"environment/alpine-rootfs/data"];
     NSString *documents = NSSearchPathForDirectoriesInDomains(
         NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *dataRoot = [documents stringByAppendingPathComponent:@"alpine-rootfs/data"];
+    NSString *legacy = [documents stringByAppendingPathComponent:@"alpine-rootfs/data"];
+    NSString *dataRoot = [[NSFileManager defaultManager] fileExistsAtPath:preferred]
+        ? preferred : legacy;
 
     // Strip leading "/" from guest path and append to host data root
     NSString *relative = guestPath;

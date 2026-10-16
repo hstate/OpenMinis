@@ -2299,7 +2299,7 @@ final class DebugJSONRPC: @unchecked Sendable {
             "documentsPath": docs.path,
             "libraryPath": library.path,
             "dataPath": dataPath.path,
-            "rootfsPath": docs.appendingPathComponent("alpine-rootfs").path,
+            "rootfsPath": RootfsManager.shared.rootfsPath.path,
             "bundlePath": bundlePath,
             // [T-ish-shell-timeout-leak] Reader-thread accounting. `liveReaders`
             // should sit at 0 between commands; a value that only grows is the

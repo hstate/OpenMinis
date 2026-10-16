@@ -301,6 +301,15 @@ extension AIChatViewModel {
         minisAppGroupRoot.appendingPathComponent("shared", isDirectory: true)
     }
 
+    /// User-visible exchange directory shown by iOS Files under
+    /// "On My iPhone/Minis 学习/Minis Files".
+    nonisolated static var minisFilesPersistentDir: URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documents.appendingPathComponent("Minis Files", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     /// Persistent storage directory for MCP server configs (servers.json,
     /// daemon log). Deliberately under MinisConfig, NOT minisAppGroupRoot:
     /// servers.json carries credentials (Authorization headers, API keys) and
@@ -341,6 +350,7 @@ extension AIChatViewModel {
             ("skills", minisSkillsPersistentDir),
             ("memory", minisMemoryPersistentDir),
             ("shared", minisSharedPersistentDir),
+            ("files", minisFilesPersistentDir),
         ]
         for (subdir, dir) in globalDirs where host == subdir {
             for subPath in subPaths {
