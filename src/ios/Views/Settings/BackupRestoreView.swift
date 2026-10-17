@@ -91,15 +91,14 @@ struct BackupRestoreView: View {
         }
         .modifier(StandaloneTitle(title: AppLocalized("Restore"),
                                  active: !embedded))
-        .fileImporter(isPresented: $showPicker,
-                      allowedContentTypes: [BackupDelivery.contentType, .data],
-                      allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first { load(url) }
-            case .failure(let error):
-                errorText = error.localizedDescription
-            }
+        .sheet(isPresented: $showPicker) {
+            BackupPackagePicker(
+                onPick: { url in
+                    showPicker = false
+                    load(url)
+                },
+                onCancel: { showPicker = false }
+            )
         }
         .sheet(isPresented: $showServerPicker) {
             ServerRestorePickerSheet { url in
@@ -1510,5 +1509,56 @@ struct ServerPackageListView: View {
     /// from then on.
     private static func discardScratch(_ fileURL: URL) {
         try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+    }
+}
+
+/// Explicit document-picker bridge for `.minisbak` packages.
+///
+/// SwiftUI's `.fileImporter` can dismiss without delivering its completion on
+/// some third-party Files providers. Using the UIKit delegate directly also
+/// lets us request a copy, so the returned URL is app-owned and immediately
+/// readable even when the provider's security scope is short-lived.
+private struct BackupPackagePicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(
+            forOpeningContentTypes: [BackupDelivery.contentType, .data],
+            asCopy: true
+        )
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onCancel: onCancel)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onCancel: () -> Void
+
+        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController,
+                            didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else {
+                onCancel()
+                return
+            }
+            onPick(url)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
+        }
     }
 }
