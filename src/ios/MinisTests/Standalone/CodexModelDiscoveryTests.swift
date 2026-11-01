@@ -325,7 +325,8 @@ if api.isEmpty {
     print("  ⏭  source not readable from this sandbox")
 } else {
     check("uses the codex models endpoint",
-          api.contains("https://chatgpt.com/backend-api/codex/models?client_version="))
+          api.contains("https://chatgpt.com/backend-api/codex/models")
+            && api.contains("URLQueryItem(name: \"client_version\", value: version)"))
     check("does NOT use the 403 /backend-api/models path",
           api.contains("\"https://chatgpt.com/backend-api/models"), false)
     check("sends Minis' own originator, not the reporter's 'omp'",
