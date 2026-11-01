@@ -213,17 +213,27 @@ do {
     check("claude-haiku-4-5 is not caught either",
           declaredMaxLevel(for: "claude-haiku-4-5") == nil)
 
-    // The catalog really is missing claude-opus-5-5 — if a future snapshot adds
-    // it, the rule becomes belt-and-braces rather than load-bearing, and this
-    // line is where that shows up.
+    // Newer snapshots may contain Opus 5.5. The regression is its ceiling,
+    // not permanent absence from an evolving model registry.
     let catalogJSON = (try? String(contentsOf: URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/models-dev-api.json"), encoding: .utf8)) ?? ""
     if catalogJSON.isEmpty {
         print("  ⏭  models-dev-api.json not readable")
     } else {
-        check("models-dev-api.json still lacks claude-opus-5-5",
-              !catalogJSON.contains("\"claude-opus-5-5\""))
+        let registry = (try? JSONSerialization.jsonObject(with: Data(catalogJSON.utf8))) as? [String: Any]
+        let models = (registry?["anthropic"] as? [String: Any])?["models"] as? [String: Any]
+        check("the Anthropic snapshot is readable", models != nil)
+        if let model = models?["claude-opus-5-5"] as? [String: Any] {
+            let tiers = (model["reasoning_options"] as? [[String: Any]])?.flatMap {
+                $0["values"] as? [String] ?? []
+            } ?? []
+            checkEq("snapshot-enriched Opus 5.5 still reaches max",
+                    ceiling(id: "claude-opus-5-5", declaredTiers: tiers), "max")
+        } else {
+            checkEq("a snapshot without Opus 5.5 still reaches max via the rule",
+                    ceiling(id: "claude-opus-5-5", declaredTiers: []), "max")
+        }
         check("…while carrying claude-opus-5 (so the comparison is meaningful)",
               catalogJSON.contains("\"claude-opus-5\""))
     }
