@@ -60,6 +60,20 @@ jobs:
           clang --version | head -1
           xcrun --sdk iphoneos metal --version || xcodebuild -downloadComponent MetalToolchain || true
 
+      - name: Check study identity and Codex configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_study_ios_identity.py
+          python3 scripts/tests/study-codex/run.py
+          swift src/ios/MinisTests/Standalone/CodexModelDiscoveryTests.swift
+          swift src/ios/MinisTests/Standalone/GPT6SolLunaOpus55CatalogTests.swift
+
+      - name: Record native source revisions
+        id: native-revisions
+        shell: bash
+        run: echo "ish=$(git rev-parse HEAD:deps/ish)" >> "$GITHUB_OUTPUT"
+
       - name: Restore native dependency cache
         id: native-cache
         uses: actions/cache@v4
@@ -70,7 +84,7 @@ jobs:
             deps/libs
             deps/include
             deps/resources
-          key: minis-ios-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deps/build_*.sh', 'deps/prepare_*.sh', 'deps/ffmpeg-patch/**', 'deps/rclone-mobile/go.mod', 'deps/rclone-mobile/go.sum', '.gitmodules') }}
+          key: minis-ios-native-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.native-revisions.outputs.ish }}-${{ hashFiles('deps/build_*.sh', 'deps/prepare_*.sh', 'deps/ffmpeg-patch/**', 'deps/rclone-mobile/**/*.go', 'deps/rclone-mobile/go.mod', 'deps/rclone-mobile/go.sum', 'deps/aot/**', '.gitmodules') }}
 
       - name: Build native dependencies
         if: steps.native-cache.outputs.cache-hit != 'true'
@@ -91,8 +105,10 @@ jobs:
           set -euxo pipefail
           test -f deps/lame-build/lib/libmp3lame.a
           test -d deps/frameworks/FFmpeg.framework
+          test -d deps/frameworks/FFmpeg.xcframework
           test -d deps/frameworks/Rclone.xcframework
           test -f deps/libs/libish.a
+          test -f deps/libs/libish_aot.a
           test -f deps/resources/alpine-rootfs.zip
 
       - name: Prepare provider customization

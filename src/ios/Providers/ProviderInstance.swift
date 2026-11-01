@@ -36,6 +36,8 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
     /// allow e.g. Claude Code). Applied to chat/models/responses requests of API-key
     /// and manual-token providers; OAuth providers keep their required client UA.
     var customUserAgent: String?
+    /// nil inherits the bundled default; scoped to this ChatGPT OAuth account.
+    var codexClientVersionOverride: String?
     /// [T-ios-azure-openai] Azure OpenAI mode. When true, OpenAIProvider auths
     /// with the `api-key:` header (not `Authorization: Bearer`) and treats the
     /// custom base URL as an Azure endpoint (the user pastes the full Azure URL
@@ -60,6 +62,7 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         imageEndpointMode: ImageEndpointMode = .auto,
         imageEndpointResolved: ImageEndpointMode? = nil,
         customUserAgent: String? = nil,
+        codexClientVersionOverride: String? = nil,
         azureMode: Bool = false,
         unknownProviderTypeRaw: String? = nil
     ) {
@@ -74,6 +77,7 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         self.imageEndpointMode = imageEndpointMode
         self.imageEndpointResolved = imageEndpointResolved
         self.customUserAgent = customUserAgent
+        self.codexClientVersionOverride = codexClientVersionOverride
         self.azureMode = azureMode
         self.unknownProviderTypeRaw = unknownProviderTypeRaw
     }
@@ -83,6 +87,7 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, label, providerType, credentialType, isEnabled, createdAt, customBaseURL, appendV1Suffix
         case imageEndpointMode, imageEndpointResolved, customUserAgent, azureMode
+        case codexClientVersionOverride
     }
 
     init(from decoder: Decoder) throws {
@@ -105,6 +110,7 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         imageEndpointResolved = try? c.decodeIfPresent(ImageEndpointMode.self, forKey: .imageEndpointResolved)
         // Additive + optional: old data without this key decodes to nil (default UA).
         customUserAgent = try c.decodeIfPresent(String.self, forKey: .customUserAgent)
+        codexClientVersionOverride = try? c.decodeIfPresent(String.self, forKey: .codexClientVersionOverride)
         // [T-ios-azure-openai] Additive + optional: old data → false (off), so
         // existing OpenAI/Responses instances keep their exact prior behavior.
         azureMode = (try? c.decodeIfPresent(Bool.self, forKey: .azureMode)) ?? false
@@ -125,9 +131,49 @@ struct ProviderInstance: Identifiable, Codable, Hashable {
         try c.encode(imageEndpointMode, forKey: .imageEndpointMode)
         try c.encodeIfPresent(imageEndpointResolved, forKey: .imageEndpointResolved)
         try c.encodeIfPresent(customUserAgent, forKey: .customUserAgent)
+        try c.encodeIfPresent(codexClientVersionOverride, forKey: .codexClientVersionOverride)
         // [T-ios-azure-openai] Only encode when on, so off-instances serialize
         // byte-identically to before this field existed (no diff/churn, no LWW noise).
         if azureMode { try c.encode(azureMode, forKey: .azureMode) }
+    }
+
+    /// Only ChatGPT OAuth uses the Codex fingerprint; API-key routes are unchanged.
+    var supportsCodexClientVersion: Bool {
+        providerType == .openAI && credentialType == .oauth
+    }
+
+    var effectiveCodexClientVersion: String {
+        guard supportsCodexClientVersion else { return OpenAIProvider.codexClientVersion }
+        return Self.normalizedCodexClientVersion(codexClientVersionOverride) ?? OpenAIProvider.codexClientVersion
+    }
+
+    /// Accept release / prerelease version strings, never arbitrary header or URL text.
+    static func normalizedCodexClientVersion(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty, value.utf8.count <= 64,
+              value.range(of: #"\A[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?\z"#,
+                          options: .regularExpression) != nil else { return nil }
+        return value
+    }
+
+    /// Use the existing forward-compatible SQLite envelope: no schema migration.
+    static func codexVersionFromExtras(_ json: String?) -> String? {
+        guard let data = json?.data(using: .utf8),
+              let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return fields["codexClientVersionOverride"] as? String
+    }
+
+    func codexVersionExtras(merging json: String?) -> String? {
+        if Self.codexVersionFromExtras(json) == codexClientVersionOverride { return json }
+        var fields: [String: Any] = [:]
+        if let data = json?.data(using: .utf8),
+           let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            fields = existing
+        }
+        fields["codexClientVersionOverride"] = codexClientVersionOverride
+        guard !fields.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Returns customUserAgent if non-nil and non-empty (trimmed), otherwise nil.
